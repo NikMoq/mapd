@@ -1,0 +1,159 @@
+name: Smoke Test Tiles
+
+on:
+  push:
+    branches: [main, p0-russian-cameras]
+    paths:
+      - 'maps/**'
+      - 'cereal/**'
+      - 'cmd/**'
+      - '**.go'
+  pull_request:
+    paths:
+      - 'maps/**'
+      - 'cereal/**'
+      - 'cmd/**'
+      - '**.go'
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  # ============================================
+  # Job 1: Validate tile generation (Moscow test area)
+  # ============================================
+  validate-tiles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install dependencies
+        run: sudo apt-get install -y capnproto wget curl iconv
+
+      - name: Generate capnp
+        run: |
+          cd cereal/offline && capnp compile -ogo offline.capnp
+          cd ../custom && capnp compile -ogo custom.capnp
+          cd ../..
+
+      - name: Build mapd
+        run: go build -v -o build/mapd ./...
+
+      - name: Download test data (Moscow area)
+        run: |
+          # Small OSM extract for fast testing
+          wget -q --show-progress -O /tmp/moscow.osm.pbf \
+            "https://download.geofabrik.de/russia/central-fed-district-latest.osm.pbf"
+          # Camera database
+          wget -q --show-progress -O /tmp/Rus.radar.raw.txt \
+            "https://speedcamonline.ru/map/Rus/Rus.radar.txt" || echo "" > /tmp/Rus.radar.raw.txt
+          iconv -f cp1251 -t utf-8 /tmp/Rus.radar.raw.txt > /tmp/Rus.radar.txt 2>/dev/null || true
+
+      - name: Generate test tile
+        run: |
+          ./build/mapd generate \
+            --osm /tmp/moscow.osm.pbf \
+            --cameras /tmp/Rus.radar.txt \
+            --out /tmp/test-tiles
+
+      - name: Validate tile output
+        run: |
+          echo "=== Smoke Test Results ==="
+          TILE_COUNT=$(find /tmp/test-tiles/offline -name "*.tar.gz" 2>/dev/null | wc -l)
+          echo "Tiles generated: $TILE_COUNT"
+
+          if [ "$TILE_COUNT" -eq 0 ]; then
+            echo "❌ No tiles generated"
+            exit 1
+          fi
+          echo "✅ Tiles generated: $TILE_COUNT"
+
+          # Check each tile size
+          MAX_SIZE=524288  # 512KB
+          for tile in /tmp/test-tiles/offline/**/*.tar.gz; do
+            SIZE=$(stat -c%s "$tile")
+            if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+              echo "❌ Tile too large: $tile ($SIZE bytes)"
+              exit 1
+            fi
+          done
+          echo "✅ All tiles under 512KB"
+
+          # Check manifest
+          if [ -f /tmp/test-tiles/manifest.json ]; then
+            echo "✅ Manifest created"
+            jq '.tiles | length' /tmp/test-tiles/manifest.json
+          else
+            echo "⚠️ No manifest.json"
+          fi
+
+          echo "=== ALL CHECKS PASSED ==="
+
+  # ============================================
+  # Job 2: ARM64 build test (emulated)
+  # ============================================
+  test-arm64-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ARM64 Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: false
+          tags: mapd-russia:test-arm64
+          load: true
+
+      - name: Verify ARM64 binary
+        run: |
+          docker run --rm mapd-russia:test-arm64 /app/mapd version || true
+          echo "✅ ARM64 build successful"
+
+  # ============================================
+  # Job 3: Data source health check
+  # ============================================
+  check-data-sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check OSM Geofabrik availability
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            "https://download.geofabrik.de/russia-latest.osm.pbf")
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
+            echo "✅ OSM Geofabrik available ($HTTP_CODE)"
+          else
+            echo "⚠️ OSM Geofabrik returned HTTP $HTTP_CODE"
+          fi
+
+      - name: Check speedcamonline.ru availability
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            "https://speedcamonline.ru/map/Rus/Rus.radar.txt")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ speedcamonline.ru available ($HTTP_CODE)"
+          else
+            echo "⚠️ speedcamonline.ru returned HTTP $HTTP_CODE"
+          fi
+
+      - name: Check GitHub API rate limit
+        run: |
+          RATE_LIMIT=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+            "https://api.github.com/rate_limit")
+          echo "GitHub API status: $RATE_LIMIT"

@@ -1,0 +1,207 @@
+name: Generate Mapd Russia Tiles
+
+on:
+  schedule:
+    # Every Sunday at 3:00 UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force generation even if sources unchanged'
+        required: false
+        default: 'false'
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  generate-and-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours max
+    permissions:
+      contents: write  # Required for creating releases
+
+    steps:
+      # ============================================
+      # Step 1: Checkout
+      # ============================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: p0-russian-cameras
+
+      # ============================================
+      # Step 2: Setup Go
+      # ============================================
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # ============================================
+      # Step 3: Install dependencies
+      # ============================================
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            capnproto \
+            wget \
+            curl \
+            jq \
+            python3 \
+            python3-pip
+          pip3 install requests
+
+      # ============================================
+      # Step 4: Generate capnp Go code
+      # ============================================
+      - name: Generate capnp code
+        run: |
+          if [ -f Makefile ] && grep -q "capnp" Makefile; then
+            make capnp
+          else
+            echo "Trying manual capnp compilation..."
+            GO_CAPNP_PATH="${GITHUB_WORKSPACE}/../go-capnp/std"
+            mkdir -p "$GO_CAPNP_PATH"
+            test -f "$GO_CAPNP_PATH/go.capnp" || \
+              curl -sL https://raw.githubusercontent.com/capnproto/go-capnp/main/std/go.capnp -o "$GO_CAPNP_PATH/go.capnp"
+            capnp compile -I "$GO_CAPNP_PATH" -ogo cereal/offline/offline.capnp
+            capnp compile -I "$GO_CAPNP_PATH" -ogo cereal/custom/custom.capnp
+          fi
+          echo "capnp generation done"
+
+      # ============================================
+      # Step 5: Build mapd binary
+      # ============================================
+      - name: Build mapd
+        run: |
+          go build -v -o mapd .
+          echo "MAPD_BIN=$(pwd)/mapd" >> $GITHUB_ENV
+          ./mapd version || true
+
+      # ============================================
+      # Step 6: Download OSM Russia PBF
+      # ============================================
+      - name: Download OSM Russia PBF
+        run: |
+          echo "Downloading russia-latest.osm.pbf..."
+          wget -q --show-progress \
+            -O /tmp/russia.osm.pbf \
+            "https://download.geofabrik.de/russia-latest.osm.pbf"
+          du -h /tmp/russia.osm.pbf
+          echo "OSM_PBF=/tmp/russia.osm.pbf" >> $GITHUB_ENV
+
+      # ============================================
+      # Step 7: Download speedcam database
+      # ============================================
+      - name: Download speedcam database
+        run: |
+          echo "Downloading Rus.radar.txt..."
+          wget -q --show-progress \
+            -O /tmp/Rus.radar.txt \
+            "https://speedcamonline.ru/map/Rus/Rus.radar.txt"
+          CAMERAS=$(wc -l < /tmp/Rus.radar.txt)
+          echo "Camera DB lines: $CAMERAS"
+          echo "CAMERA_DB=/tmp/Rus.radar.txt" >> $GITHUB_ENV
+
+      # ============================================
+      # Step 8: Generate tiles
+      # ============================================
+      - name: Generate tiles
+        run: |
+          mkdir -p /tmp/tiles
+          echo "Generating tiles with mapd..."
+          $MAPD_BIN generate \
+            --osm "$OSM_PBF" \
+            --cameras "$CAMERA_DB" \
+            --out /tmp/tiles
+          echo "Tiles generated:"
+          find /tmp/tiles/offline -name "*.tar.gz" | wc -l
+
+      # ============================================
+      # Step 9: Create manifest.json
+      # ============================================
+      - name: Generate manifest
+        run: |
+          VERSION="v$(date +%Y.%m.%d)-rus"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          python3 << 'PYEOF'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          tiles_dir = Path("/tmp/tiles/offline")
+          manifest = {
+              "version": os.environ.get("VERSION", "unknown"),
+              "generation": int(__import__("time").time()),
+              "tiles": {},
+              "coverage": {
+                  "minLat": 41.0,
+                  "minLon": 19.0,
+                  "maxLat": 82.0,
+                  "maxLon": 169.0,
+              },
+          }
+
+          for tile_file in sorted(tiles_dir.rglob("*.tar.gz")):
+              rel = tile_file.relative_to(Path("/tmp/tiles")).as_posix()
+              h = hashlib.sha256()
+              with open(tile_file, "rb") as f:
+                  for chunk in iter(lambda: f.read(65536), b""):
+                      h.update(chunk)
+              manifest["tiles"][rel] = {
+                  "hash": h.hexdigest(),
+                  "size": tile_file.stat().st_size,
+              }
+
+          with open("/tmp/tiles/manifest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+
+          total_size = sum(t["size"] for t in manifest["tiles"].values())
+          print(f"Manifest: {len(manifest['tiles'])} tiles, {total_size / 1024 / 1024:.1f} MB total")
+          PYEOF
+
+      # ============================================
+      # Step 10: Create release archive
+      # ============================================
+      - name: Create release archive
+        run: |
+          cd /tmp/tiles
+          tar -czf /tmp/mapd-russia-tiles.tar.gz offline/ manifest.json
+          du -h /tmp/mapd-russia-tiles.tar.gz
+          echo "RELEASE_ARCHIVE=/tmp/mapd-russia-tiles.tar.gz" >> $GITHUB_ENV
+
+      # ============================================
+      # Step 11: Create GitHub Release
+      # ============================================
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: "Mapd Russia Tiles — ${{ env.VERSION }}"
+          body: |
+            ## 🗺️ Mapd Russia Tiles — ${{ env.VERSION }}
+
+            Автоматически сгенерированные тайлы карт РФ с камерами.
+
+            ### 📦 Состав релиза
+            - `mapd-russia-tiles.tar.gz` — все тайлы + manifest.json
+            - Покрытие: РФ (41°–82° с.ш., 19°–169° в.д.)
+
+            ### 📡 Источники данных
+            - OSM: [Geofabrik Russia](https://download.geofabrik.de/russia.html)
+            - Камеры: [speedcamonline.ru](https://speedcamonline.ru)
+
+            ### 🔧 Использование в sunnypilot
+            ```bash
+            # Скачать и распаковать
+            wget https://github.com/${{ github.repository }}/releases/download/${{ env.VERSION }}/mapd-russia-tiles.tar.gz
+            tar -xzf mapd-russia-tiles.tar.gz -C /data/mapd/
+            ```
+          files: |
+            /tmp/mapd-russia-tiles.tar.gz
+            /tmp/tiles/manifest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

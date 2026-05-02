@@ -1,22 +1,54 @@
-FROM ubuntu:24.04
-WORKDIR /usr/local/app
+# Multi-stage Dockerfile for mapd-russia
+# Builds ARM64 binary for sunnypilot / embedded Linux
 
-# Install the application dependencies
-COPY scripts/install-ubuntu-deps.sh ./
-RUN ./install-ubuntu-deps.sh
+# ============================================
+# Stage 1: Builder
+# ============================================
+FROM golang:1.21-alpine AS builder
 
-COPY go.mod ./
-COPY go.sum ./
+RUN apk add --no-cache \
+    capnproto \
+    capnproto-dev \
+    wget \
+    git \
+    build-base
+
+WORKDIR /app
+
+# Copy module files first for better caching
+COPY go.mod go.sum ./
 RUN go mod download
 
-COPY Makefile ./
-RUN make capnp-deps
+# Copy source
+COPY . .
 
-COPY . /usr/local/app
+# Generate capnp Go code
+RUN cd cereal/offline && \
+    capnp compile -I /usr/include -ogo offline.capnp
+RUN cd cereal/custom && \
+    capnp compile -I /usr/include -ogo custom.capnp
 
-RUN PATH=$PATH:/home/root/go/bin make
+# Build static binary for ARM64 (sunpilot target)
+RUN GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build \
+    -o /app/mapd \
+    -ldflags "-s -w -extldflags '-static'" \
+    ./...
 
-RUN mv build/mapd ./mapd
-RUN mv scripts/* ./
+# Verify
+RUN file /app/mapd && ls -lh /app/mapd
 
-CMD ["./docker_entry.sh"]
+# ============================================
+# Stage 2: Runtime (minimal)
+# ============================================
+FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates
+
+# Copy binary
+COPY --from=builder /app/mapd /usr/local/bin/mapd
+
+# Create data directory
+RUN mkdir -p /data/mapd/offline
+
+ENTRYPOINT ["/usr/local/bin/mapd"]
+CMD ["version"]
