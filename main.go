@@ -92,14 +92,16 @@ func main() {
 		if gpsSuccess {
 			state.DistanceSinceLastPosition = 0
 			state.Position = m.PosFromLocation(location)
+			state.Heading = float64(location.BearingDeg())
 			box := state.Data.Box()
 			pos := m.PosFromLocation(location)
 			if len(state.Data.Ways()) == 0 || !box.PosInside(pos) {
-				state.Data, err = maps.FindWaysAroundPosition(pos)
+			state.Data, err = maps.FindWaysAroundPosition(pos)
 				if err != nil {
 					slog.Debug("", "error", errors.Wrap(err, "Could not find ways around location"))
 					continue
 				}
+				state.InitCameraIndex()
 			}
 
 			state.CurrentWay, err = GetCurrentWay(state.CurrentWay, state.NextWays, &state.Data, location)

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
+
 	"pfeifer.dev/mapd/cereal"
 	"pfeifer.dev/mapd/cereal/car"
 	"pfeifer.dev/mapd/cereal/custom"
@@ -13,6 +16,8 @@ type State struct {
 	Publisher                 *cereal.Publisher[custom.MapdOut]
 	Data                      maps.Offline
 	Car                       CarState
+	CameraIdx                 *maps.CameraIndex
+	Heading                   float64 // bearing from GPS, degrees 0-360
 	CurrentWay                CurrentWay
 	SpeedLimit                SpeedLimitState
 	NextWays                  []maps.NextWayResult
@@ -33,6 +38,16 @@ func (s *State) Init() {
 	s.NextHazard = NewUpcoming(10, "", checkWayForHazardChange)
 	s.NextAdvisorySpeed = NewUpcoming(10, 0, checkWayForAdvisorySpeedChange)
 	s.SpeedLimit.Init()
+}
+
+// InitCameraIndex rebuilds the camera spatial index when new tile data loads.
+func (s *State) InitCameraIndex() {
+	ext := maps.ReadOfflineWithCameras(s.Data.RawData())
+	if !ext.Loaded || len(ext.Tiles) == 0 {
+		s.CameraIdx = nil
+		return
+	}
+	s.CameraIdx = maps.NewCameraIndex(ext.Tiles, ext.Gen)
 }
 
 
@@ -114,6 +129,32 @@ func (s *State) Send() error {
 	output.SetDistanceFromWayCenter(float32(s.CurrentWay.OnWay.Distance.Distance))
 
 	output.SetWaySelectionType(s.CurrentWay.SelectionType)
+
+	// --- Russian speed camera support (mapd-russia) ---
+	if s.CameraIdx != nil {
+		camInfo, ok := s.CameraIdx.FindCameraAhead(
+			s.Position.Latitude(), s.Position.Longitude(),
+			s.Heading, float64(s.Car.VEgo),
+		)
+		if ok {
+			output.SetNextCamera(camInfo)
+			// Write to Params for sunnypilot UI
+			paramsData, _ := json.Marshal(map[string]interface{}{
+				"type":       camInfo.Type(),
+				"distance":   camInfo.Distance(),
+				"speedLimit": camInfo.SpeedLimit(),
+				"confidence": camInfo.Confidence(),
+				"isGroup":    camInfo.IsGroup(),
+			})
+			os.WriteFile("/data/params/d/NextCamera", paramsData, 0644)
+		} else {
+			output.SetNextCamera(custom.CameraInfo{})
+			os.Remove("/data/params/d/NextCamera")
+		}
+	} else {
+		os.Remove("/data/params/d/NextCamera")
+	}
+	// ---------------------------------------------
 
 	return s.Publisher.Send(msg)
 }

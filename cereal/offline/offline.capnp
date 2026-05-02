@@ -25,11 +25,34 @@ struct Coordinates {
   longitude @1 :Float64;
 }
 
+struct Camera {
+  latitude   @0 :Float64;
+  longitude  @1 :Float64;
+  type       @2 :Text;       # "stationary", "mobile", "tripod", "avtodoria"
+  speedLimit @3 :Float32;    # km/h from OSM way, 0 if unknown
+  bearing    @4 :Float32;    # 0-360, direction of enforcement
+  confidence @5 :Float32;    # 0.0-1.0, map-matching quality
+  groupId    @6 :Text;       # for cascade cameras (avtodoria)
+  timestamp  @7 :UInt32;     # unix timestamp when added to DB (for mobile TTL)
+}
+
+struct CameraTile {
+  minLat  @0 :Float64;
+  minLon  @1 :Float64;
+  maxLat  @2 :Float64;
+  maxLon  @3 :Float64;
+  cameras @4 :List(Camera);
+  hash    @5 :UInt64;        # Morton code / z-order for fast lookup
+}
+
 struct Offline {
-  minLat @0 :Float64;
-  minLon @1 :Float64;
-  maxLat @2 :Float64;
-  maxLon @3 :Float64;
-  ways @4 :List(Way);
+  minLat  @0 :Float64;
+  minLon  @1 :Float64;
+  maxLat  @2 :Float64;
+  maxLon  @3 :Float64;
+  ways    @4 :List(Way);
   overlap @5 :Float64;
+  cameraTiles @6 :List(CameraTile);
+  generation  @7 :UInt32;    # unix timestamp of generation
+  version     @8 :Text;      # e.g. "2026-05-02-v3"
 }
