@@ -23,13 +23,14 @@ func ReadOffline(data []uint8) Offline {
 		}
 		// allow us to read as much as we want
 		offlineMaps.Message().ResetReadLimit(math.MaxUint64)
-		return Offline{offline: offlineMaps, Loaded: true}
+		return Offline{offline: offlineMaps, Loaded: true, RawData: data}
 	}
 	return Offline{Loaded: false}
 }
 
 type Offline struct {
 	Loaded     bool
+	RawData    []uint8
 	offline    offline.Offline
 	box        u.Curry[m.Box]
 	overlapBox u.Curry[m.Box]

@@ -133,14 +133,15 @@ func (s *State) Send() error {
 	// --- Russian speed camera support (mapd-russia) ---
 	if s.CameraIdx != nil {
 		camInfo, ok := s.CameraIdx.FindCameraAhead(
-			s.Position.Latitude(), s.Position.Longitude(),
+			s.Position.Lat(), s.Position.Lon(),
 			s.Heading, float64(s.Car.VEgo),
 		)
 		if ok {
 			output.SetNextCamera(camInfo)
 			// Write to Params for sunnypilot UI
+			camType, _ := camInfo.Type()
 			paramsData, _ := json.Marshal(map[string]interface{}{
-				"type":       camInfo.Type(),
+				"type":       camType,
 				"distance":   camInfo.Distance(),
 				"speedLimit": camInfo.SpeedLimit(),
 				"confidence": camInfo.Confidence(),
