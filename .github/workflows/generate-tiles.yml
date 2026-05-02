@@ -54,21 +54,19 @@ jobs:
           pip3 install requests
 
       # ============================================
-      # Step 4: Generate capnp Go code
+      # Step 4: Install capnpc-go and generate capnp Go code
       # ============================================
+      - name: Install capnpc-go
+        run: |
+          go install capnproto.org/go/capnp/v3/capnpc-go@v3.1.0-alpha.1
+          git clone -b v3.1.0-alpha.1 https://github.com/capnproto/go-capnp /tmp/go-capnp
+          echo "capnpc-go installed"
+
       - name: Generate capnp code
         run: |
-          if [ -f Makefile ] && grep -q "capnp" Makefile; then
-            make capnp
-          else
-            echo "Trying manual capnp compilation..."
-            GO_CAPNP_PATH="${GITHUB_WORKSPACE}/../go-capnp/std"
-            mkdir -p "$GO_CAPNP_PATH"
-            test -f "$GO_CAPNP_PATH/go.capnp" || \
-              curl -sL https://raw.githubusercontent.com/capnproto/go-capnp/main/std/go.capnp -o "$GO_CAPNP_PATH/go.capnp"
-            capnp compile -I "$GO_CAPNP_PATH" -ogo cereal/offline/offline.capnp
-            capnp compile -I "$GO_CAPNP_PATH" -ogo cereal/custom/custom.capnp
-          fi
+          export PATH=$PATH:$(go env GOPATH)/bin
+          export GO_CAPNP_PATH=/tmp/go-capnp/std
+          make capnp
           echo "capnp generation done"
 
       # ============================================
