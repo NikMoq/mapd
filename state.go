@@ -42,7 +42,7 @@ func (s *State) Init() {
 
 // InitCameraIndex rebuilds the camera spatial index when new tile data loads.
 func (s *State) InitCameraIndex() {
-	ext := maps.ReadOfflineWithCameras(s.Data.RawData())
+	ext := maps.ReadOfflineWithCameras(s.Data.RawData)
 	if !ext.Loaded || len(ext.Tiles) == 0 {
 		s.CameraIdx = nil
 		return
