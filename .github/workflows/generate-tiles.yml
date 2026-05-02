@@ -12,7 +12,7 @@ on:
         default: 'false'
 
 env:
-  GO_VERSION: '1.21'
+  GO_VERSION: '1.25'
 
 jobs:
   generate-and-release:
@@ -28,7 +28,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: p0-russian-cameras
+          ref: main
 
       # ============================================
       # Step 2: Setup Go
@@ -72,13 +72,23 @@ jobs:
           echo "capnp generation done"
 
       # ============================================
-      # Step 5: Build mapd binary
+      # Step 5: Tidy and verify Go modules
       # ============================================
-      - name: Build mapd
+      - name: Go mod tidy
+        run: go mod tidy
+
+      # ============================================
+      # Step 6: Build mapd binary (ARM64 for Comma)
+      # ============================================
+      - name: Build mapd binary
         run: |
-          go build -v -o mapd .
-          echo "MAPD_BIN=$(pwd)/mapd" >> $GITHUB_ENV
-          ./mapd version || true
+          # Build native (for tile generation)
+          go build -v -o mapd-native .
+          echo "MAPD_NATIVE=$(pwd)/mapd-native" >> $GITHUB_ENV
+          # Build ARM64 for sunnypilot
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -v -o mapd-linux-arm64 .
+          echo "MAPD_ARM64=$(pwd)/mapd-linux-arm64" >> $GITHUB_ENV
+          ./mapd-native version || true
 
       # ============================================
       # Step 6: Download OSM Russia PBF
@@ -111,8 +121,8 @@ jobs:
       - name: Generate tiles
         run: |
           mkdir -p /tmp/tiles
-          echo "Generating tiles with mapd..."
-          $MAPD_BIN generate \
+          echo "Generating tiles..."
+          go run cmd/generate.go \
             --osm "$OSM_PBF" \
             --cameras "$CAMERA_DB" \
             --out /tmp/tiles
@@ -203,5 +213,6 @@ jobs:
           files: |
             /tmp/mapd-russia-tiles.tar.gz
             /tmp/tiles/manifest.json
+            ${{ env.MAPD_ARM64 }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
