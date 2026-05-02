@@ -71,7 +71,7 @@ func CheckReleaseUpdate() (bool, string, error) {
 		return false, "", err
 	}
 
-	localVer := params.GetString("MapdRussiaVersion", "")
+	localVer := getParamString("MapdRussiaVersion", "")
 	if localVer == latest.TagName {
 		return false, latest.TagName, nil
 	}
@@ -106,9 +106,20 @@ func DownloadAndExtractRelease(version string) error {
 	}
 
 	// Save version
-	params.PutString("MapdRussiaVersion", version)
+	if err := params.PutParam(params.ParamPath("MapdRussiaVersion"), []byte(version)); err != nil {
+		return errors.Wrap(err, "save version param")
+	}
 	slog.Info("Tiles updated", "version", version)
 	return nil
+}
+
+// getParamString reads a string param, returning defaultVal if missing.
+func getParamString(name string, defaultVal string) string {
+	data, err := params.GetParam(params.ParamPath(name))
+	if err != nil || len(data) == 0 {
+		return defaultVal
+	}
+	return string(data)
 }
 
 func downloadFile(url, dest string) error {
