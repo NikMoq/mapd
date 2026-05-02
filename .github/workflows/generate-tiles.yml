@@ -66,7 +66,12 @@ jobs:
         run: |
           export PATH=$PATH:$(go env GOPATH)/bin
           export GO_CAPNP_PATH=/tmp/go-capnp/std
+          # Force regenerate by removing old .capnp.go files
+          rm -f cereal/offline/offline.capnp.go cereal/custom/custom.capnp.go
           make capnp
+          # Verify new types exist
+          grep -q "type Camera struct" cereal/offline/offline.capnp.go && echo "Camera OK"
+          grep -q "type CameraInfo struct" cereal/custom/custom.capnp.go && echo "CameraInfo OK"
           echo "capnp generation done"
 
       # ============================================
