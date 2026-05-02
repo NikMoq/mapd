@@ -78,20 +78,24 @@ jobs:
       # Step 5: Tidy and verify Go modules
       # ============================================
       - name: Go mod tidy
-        run: go mod tidy
+        run: |
+          export CGO_ENABLED=1
+          go mod tidy
 
       # ============================================
       # Step 6: Build mapd binary (ARM64 for Comma)
       # ============================================
       - name: Build mapd binary
         run: |
+          export CGO_ENABLED=1
           # Build native (for tile generation)
           go build -v -o mapd-native .
           echo "MAPD_NATIVE=$(pwd)/mapd-native" >> $GITHUB_ENV
-          # Build ARM64 for sunnypilot
-          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -v -o mapd-linux-arm64 .
-          echo "MAPD_ARM64=$(pwd)/mapd-linux-arm64" >> $GITHUB_ENV
           ./mapd-native version || true
+          # Build ARM64 for sunnypilot (cross-compile with cgo)
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -ldflags="-s -w" -v -o mapd-linux-arm64 .
+          echo "MAPD_ARM64=$(pwd)/mapd-linux-arm64" >> $GITHUB_ENV
 
       # ============================================
       # Step 6: Download OSM Russia PBF
