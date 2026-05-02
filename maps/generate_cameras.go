@@ -317,7 +317,7 @@ func WriteCameraTile(tile offline.CameraTile, path string) error {
 		return errors.Wrap(err, "read cameras")
 	}
 
-	dstCams, err := dest.NewCameras(srcCams.Len())
+	dstCams, err := dest.NewCameras(int32(srcCams.Len()))
 	if err != nil {
 		return errors.Wrap(err, "new cameras")
 	}
