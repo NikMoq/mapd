@@ -44,11 +44,13 @@ jobs:
           export PATH=$PATH:$(go env GOPATH)/bin
           export GO_CAPNP_PATH=/tmp/go-capnp/std
           # Fix module paths for fork
+          sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' go.mod
           find . -name '*.go' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
           find . -name '*.capnp' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
           # Force regenerate all capnp Go files
           rm -f cereal/*/*.capnp.go
           make capnp
+          go mod tidy
 
       - name: Build native mapd
         run: |
@@ -95,11 +97,13 @@ jobs:
           export PATH=$PATH:$(go env GOPATH)/bin
           export GO_CAPNP_PATH=/tmp/go-capnp/std
           # Fix module paths for fork
+          sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' go.mod
           find . -name '*.go' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
           find . -name '*.capnp' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
           # Force regenerate all capnp Go files
           rm -f cereal/*/*.capnp.go
           make capnp
+          go mod tidy
 
       - name: Build ARM64 mapd (cross-compile)
         run: |
