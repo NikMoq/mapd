@@ -55,7 +55,7 @@ jobs:
       - name: Build native mapd
         run: |
           go build -ldflags="-s -w" -o mapd-native .
-          ./mapd-native version || true
+          file mapd-native
 
       - name: Upload native binary
         uses: actions/upload-artifact@v4
