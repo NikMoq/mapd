@@ -50,11 +50,7 @@ jobs:
           sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' go.mod
           go mod tidy
           rm -f cereal/*/*.capnp.go
-          # Debug capnp compile
-          capnp compile -I /tmp/go-capnp/std -ogo cereal/offline/offline.capnp 2>&1 || echo 'capnp compile failed'
-          ls -la cereal/offline/
           make capnp 2>&1 || echo 'make capnp failed'
-          ls -la cereal/offline/
           # Verify new types exist
           grep -q 'type Camera struct' cereal/offline/offline.capnp.go && echo 'Camera OK'
           grep -q 'type CameraTile struct' cereal/offline/offline.capnp.go && echo 'CameraTile OK'
@@ -111,11 +107,7 @@ jobs:
           sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' go.mod
           go mod tidy
           rm -f cereal/*/*.capnp.go
-          # Debug capnp compile
-          capnp compile -I /tmp/go-capnp/std -ogo cereal/offline/offline.capnp 2>&1 || echo 'capnp compile failed'
-          ls -la cereal/offline/
           make capnp 2>&1 || echo 'make capnp failed'
-          ls -la cereal/offline/
           # Verify new types exist
           grep -q 'type Camera struct' cereal/offline/offline.capnp.go && echo 'Camera OK'
           grep -q 'type CameraTile struct' cereal/offline/offline.capnp.go && echo 'CameraTile OK'
