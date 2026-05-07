@@ -46,6 +46,7 @@ jobs:
           which capnpc-go || echo 'capnpc-go NOT FOUND'
           capnpc-go --version || echo 'capnpc-go version check failed'
           find . -name '*.go' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
+          find . -name '*.capnp' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
           sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' go.mod
           go mod tidy
           rm -f cereal/*/*.capnp.go
@@ -106,6 +107,7 @@ jobs:
           which capnpc-go || echo 'capnpc-go NOT FOUND'
           capnpc-go --version || echo 'capnpc-go version check failed'
           find . -name '*.go' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
+          find . -name '*.capnp' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
           sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' go.mod
           go mod tidy
           rm -f cereal/*/*.capnp.go
