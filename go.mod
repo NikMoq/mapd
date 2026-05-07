@@ -1,4 +1,4 @@
-module pfeifer.dev/mapd
+module github.com/NikMoq/mapd
 
 go 1.25.1
 
