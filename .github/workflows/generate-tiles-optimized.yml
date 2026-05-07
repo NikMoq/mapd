@@ -50,6 +50,8 @@ jobs:
         run: |
           export PATH=$PATH:$(go env GOPATH)/bin
           export GO_CAPNP_PATH=/tmp/go-capnp/std
+          which capnpc-go || echo 'capnpc-go NOT FOUND'
+          capnpc-go --version || echo 'capnpc-go version check failed'
           find . -name '*.go' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
           sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' go.mod
           go mod tidy
