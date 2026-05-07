@@ -50,6 +50,8 @@ jobs:
         run: |
           export PATH=$PATH:$(go env GOPATH)/bin
           export GO_CAPNP_PATH=/tmp/go-capnp/std
+          sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' go.mod
+          go mod tidy
           make capnp
           go build -ldflags="-s -w" -o mapd .
 
