@@ -1,0 +1,144 @@
+name: Build mapd Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  # ============================================================================
+  # Job 1: Build native binary (for tile generation)
+  # ============================================================================
+  build-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install capnproto
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y capnproto
+          go install capnproto.org/go/capnp/v3/capnpc-go@v3.1.0-alpha.1
+          git clone -b v3.1.0-alpha.1 --depth 1 https://github.com/capnproto/go-capnp /tmp/go-capnp
+
+      - name: Generate capnp code
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          export GO_CAPNP_PATH=/tmp/go-capnp/std
+          make capnp
+
+      - name: Build native mapd
+        run: |
+          go build -ldflags="-s -w" -o mapd-native .
+          ./mapd-native version || true
+
+      - name: Upload native binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mapd-native
+          path: mapd-native
+
+  # ============================================================================
+  # Job 2: Build ARM64 binary (for comma device) - FAST with cross-compile
+  # ============================================================================
+  build-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install capnproto
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y capnproto gcc-aarch64-linux-gnu
+          go install capnproto.org/go/capnp/v3/capnpc-go@v3.1.0-alpha.1
+          git clone -b v3.1.0-alpha.1 --depth 1 https://github.com/capnproto/go-capnp /tmp/go-capnp
+
+      - name: Generate capnp code
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          export GO_CAPNP_PATH=/tmp/go-capnp/std
+          make capnp
+
+      - name: Build ARM64 mapd (cross-compile)
+        run: |
+          CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 \
+            go build -ldflags="-s -w" -o mapd-linux-arm64 .
+          file mapd-linux-arm64
+
+      - name: Upload ARM64 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mapd-linux-arm64
+          path: mapd-linux-arm64
+
+  # ============================================================================
+  # Job 3: Create Release with both binaries
+  # ============================================================================
+  release:
+    needs: [build-native, build-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Prepare release files
+        run: |
+          cp mapd-native/mapd-native mapd
+          chmod +x mapd
+          tar czf mapd-linux-arm64.tar.gz -C mapd-linux-arm64 mapd-linux-arm64
+          tar czf mapd-native.tar.gz mapd
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=dev-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: "mapd ${{ steps.version.outputs.VERSION }}"
+          files: |
+            mapd-linux-arm64.tar.gz
+            mapd-native.tar.gz
+          generate_release_notes: true

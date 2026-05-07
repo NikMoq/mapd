@@ -1,0 +1,292 @@
+name: Generate Mapd Russia Tiles (Optimized)
+
+on:
+  schedule:
+    # Every Sunday at 3:00 UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force generation even if sources unchanged'
+        required: false
+        default: 'false'
+      regions:
+        description: 'Regions to generate (comma-separated: moscow,spb,kazan,etc or "all")'
+        required: false
+        default: 'all'
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  # ============================================================================
+  # Job 1: Build mapd native binary (cached)
+  # ============================================================================
+  build-mapd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y capnproto
+          go install capnproto.org/go/capnp/v3/capnpc-go@v3.1.0-alpha.1
+          git clone -b v3.1.0-alpha.1 --depth 1 https://github.com/capnproto/go-capnp /tmp/go-capnp
+
+      - name: Build
+        run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          export GO_CAPNP_PATH=/tmp/go-capnp/std
+          make capnp
+          go build -ldflags="-s -w" -o mapd .
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mapd-binary
+          path: mapd
+          retention-days: 1
+
+  # ============================================================================
+  # Job 2: Download and cache OSM data
+  # ============================================================================
+  cache-osm-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Cache OSM PBF
+        id: cache-pbf
+        uses: actions/cache@v4
+        with:
+          path: /tmp/osm-cache
+          key: osm-russia-${{ github.run_id }}
+          restore-keys: |
+            osm-russia-
+
+      - name: Download OSM Russia (if not cached)
+        if: steps.cache-pbf.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/osm-cache
+          echo "Downloading Russia PBF..."
+          wget -q --show-progress \
+            -O /tmp/osm-cache/russia.osm.pbf \
+            "https://download.geofabrik.de/russia-latest.osm.pbf"
+          du -h /tmp/osm-cache/russia.osm.pbf
+
+      - name: Cache speedcam database
+        id: cache-cameras
+        uses: actions/cache@v4
+        with:
+          path: /tmp/camera-cache
+          key: cameras-russia-${{ github.run_id }}
+          restore-keys: |
+            cameras-russia-
+
+      - name: Download speedcam database (if not cached)
+        if: steps.cache-cameras.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/camera-cache
+          wget -q --show-progress \
+            -O /tmp/camera-cache/Rus.radar.txt \
+            "https://speedcamonline.ru/map/Rus/Rus.radar.txt" || \
+            echo "" > /tmp/camera-cache/Rus.radar.txt
+          wc -l /tmp/camera-cache/Rus.radar.txt
+
+      - name: Upload OSM data
+        uses: actions/upload-artifact@v4
+        with:
+          name: osm-data
+          path: |
+            /tmp/osm-cache/russia.osm.pbf
+            /tmp/camera-cache/Rus.radar.txt
+          retention-days: 1
+
+  # ============================================================================
+  # Job 3: Generate tiles by region (PARALLEL)
+  # ============================================================================
+  generate-region:
+    needs: [build-mapd, cache-osm-data]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        region:
+          - name: moscow
+            bbox: "36.8,54.6,38.2,56.0"
+            pbf_url: "https://download.geofabrik.de/russia/central-fed-district-latest.osm.pbf"
+          - name: spb
+            bbox: "29.5,59.5,31.5,60.5"
+            pbf_url: "https://download.geofabrik.de/russia/northwestern-fed-district-latest.osm.pbf"
+          - name: kazan
+            bbox: "48.5,55.5,50.0,56.0"
+            pbf_url: "https://download.geofabrik.de/russia/volga-fed-district-latest.osm.pbf"
+          - name: sochi
+            bbox: "39.5,43.3,40.0,43.7"
+            pbf_url: "https://download.geofabrik.de/russia/southern-fed-district-latest.osm.pbf"
+          - name: novosibirsk
+            bbox: "82.5,54.8,83.2,55.2"
+            pbf_url: "https://download.geofabrik.de/russia/siberian-fed-district-latest.osm.pbf"
+          - name: yekaterinburg
+            bbox: "59.8,56.6,61.0,57.0"
+            pbf_url: "https://download.geofabrik.de/russia/ural-fed-district-latest.osm.pbf"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download mapd binary
+        uses: actions/download-artifact@v4
+        with:
+          name: mapd-binary
+
+      - name: Download OSM data
+        uses: actions/download-artifact@v4
+        with:
+          name: osm-data
+          path: /tmp/
+
+      - name: Setup region data
+        run: |
+          chmod +x mapd
+          mkdir -p /tmp/tiles/${{ matrix.region.name }}
+          # Try to use full Russia PBF, fallback to regional
+          if [ -f "/tmp/osm-data/russia.osm.pbf" ]; then
+            OSM_FILE="/tmp/osm-data/russia.osm.pbf"
+          else
+            echo "Downloading regional PBF..."
+            wget -q -O /tmp/region.osm.pbf "${{ matrix.region.pbf_url }}"
+            OSM_FILE="/tmp/region.osm.pbf"
+          fi
+          echo "OSM_FILE=$OSM_FILE" >> $GITHUB_ENV
+          echo "CAMERA_FILE=/tmp/osm-data/Rus.radar.txt" >> $GITHUB_ENV
+
+      - name: Generate tiles for ${{ matrix.region.name }}
+        run: |
+          echo "Generating tiles for ${{ matrix.region.name }}..."
+          ./mapd generate \
+            --osm "$OSM_FILE" \
+            --cameras "$CAMERA_FILE" \
+            --out /tmp/tiles/${{ matrix.region.name }} \
+            --bbox "${{ matrix.region.bbox }}"
+          echo "Tiles generated:"
+          find /tmp/tiles/${{ matrix.region.name }}/offline -name "*.tar.gz" | wc -l
+
+      - name: Upload region tiles
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiles-${{ matrix.region.name }}
+          path: /tmp/tiles/${{ matrix.region.name }}/offline/
+          retention-days: 1
+
+  # ============================================================================
+  # Job 4: Merge and create release
+  # ============================================================================
+  merge-and-release:
+    needs: generate-region
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all region tiles
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/all-tiles
+          pattern: tiles-*
+
+      - name: Merge tiles and create manifest
+        run: |
+          mkdir -p /tmp/release/offline
+          
+          # Copy all tiles
+          for dir in /tmp/all-tiles/tiles-*/; do
+            cp -r "$dir"/* /tmp/release/offline/ 2>/dev/null || true
+          done
+          
+          # Create manifest
+          VERSION="v$(date +%Y.%m.%d)-rus"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          
+          python3 << 'PYEOF'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          tiles_dir = Path("/tmp/release/offline")
+          manifest = {
+              "version": os.environ["VERSION"],
+              "generation": int(__import__("time").time()),
+              "tiles": {},
+              "coverage": {
+                  "minLat": 41.0,
+                  "minLon": 19.0,
+                  "maxLat": 82.0,
+                  "maxLon": 169.0,
+              },
+          }
+
+          for tile_file in sorted(tiles_dir.rglob("*.tar.gz")):
+              rel = tile_file.relative_to(Path("/tmp/release")).as_posix()
+              h = hashlib.sha256()
+              with open(tile_file, "rb") as f:
+                  for chunk in iter(lambda: f.read(65536), b""):
+                      h.update(chunk)
+              manifest["tiles"][rel] = {
+                  "hash": h.hexdigest(),
+                  "size": tile_file.stat().st_size,
+              }
+
+          with open("/tmp/release/manifest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+
+          total_size = sum(t["size"] for t in manifest["tiles"].values())
+          print(f"Manifest: {len(manifest['tiles'])} tiles, {total_size / 1024 / 1024:.1f} MB total")
+          PYEOF
+
+      - name: Create release archive
+        run: |
+          cd /tmp/release
+          tar czf /tmp/mapd-russia-tiles.tar.gz offline/ manifest.json
+          du -h /tmp/mapd-russia-tiles.tar.gz
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: "Mapd Russia Tiles 🗺️ ${{ env.VERSION }}"
+          body: |
+            ## 🗺️ Mapd Russia Tiles - ${{ env.VERSION }}
+
+            ### Coverage
+            - Moscow & Central
+            - St. Petersburg & North-West
+            - Kazan & Volga
+            - Sochi & South
+            - Novosibirsk & Siberia
+            - Yekaterinburg & Ural
+
+            ### Files
+            - `mapd-russia-tiles.tar.gz` - All tiles + manifest.json
+
+            ### Installation
+            ```bash
+            wget https://github.com/${{ github.repository }}/releases/download/${{ env.VERSION }}/mapd-russia-tiles.tar.gz
+            tar xzf mapd-russia-tiles.tar.gz -C /data/media/0/osm/
+            ```
+          files: /tmp/mapd-russia-tiles.tar.gz
