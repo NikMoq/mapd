@@ -43,18 +43,12 @@ jobs:
         run: |
           export PATH=$PATH:$(go env GOPATH)/bin
           export GO_CAPNP_PATH=/tmp/go-capnp/std
-          which capnpc-go || echo 'capnpc-go NOT FOUND'
-          capnpc-go --version || echo 'capnpc-go version check failed'
+          # Fix module paths for fork
           find . -name '*.go' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
           find . -name '*.capnp' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
-          sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' go.mod
-          go mod tidy
+          # Force regenerate all capnp Go files
           rm -f cereal/*/*.capnp.go
-          make capnp 2>&1 || echo 'make capnp failed'
-          # Verify new types exist
-          grep -q 'type Camera struct' cereal/offline/offline.capnp.go && echo 'Camera OK'
-          grep -q 'type CameraTile struct' cereal/offline/offline.capnp.go && echo 'CameraTile OK'
-          grep -q 'type CameraInfo struct' cereal/custom/custom.capnp.go && echo 'CameraInfo OK'
+          make capnp
 
       - name: Build native mapd
         run: |
@@ -100,18 +94,12 @@ jobs:
         run: |
           export PATH=$PATH:$(go env GOPATH)/bin
           export GO_CAPNP_PATH=/tmp/go-capnp/std
-          which capnpc-go || echo 'capnpc-go NOT FOUND'
-          capnpc-go --version || echo 'capnpc-go version check failed'
+          # Fix module paths for fork
           find . -name '*.go' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
           find . -name '*.capnp' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
-          sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' go.mod
-          go mod tidy
+          # Force regenerate all capnp Go files
           rm -f cereal/*/*.capnp.go
-          make capnp 2>&1 || echo 'make capnp failed'
-          # Verify new types exist
-          grep -q 'type Camera struct' cereal/offline/offline.capnp.go && echo 'Camera OK'
-          grep -q 'type CameraTile struct' cereal/offline/offline.capnp.go && echo 'CameraTile OK'
-          grep -q 'type CameraInfo struct' cereal/custom/custom.capnp.go && echo 'CameraInfo OK'
+          make capnp
 
       - name: Build ARM64 mapd (cross-compile)
         run: |
