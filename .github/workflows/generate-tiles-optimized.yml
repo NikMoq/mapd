@@ -53,7 +53,12 @@ jobs:
           find . -name '*.go' -exec sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' {} +
           sed -i 's|pfeifer.dev/mapd|github.com/NikMoq/mapd|g' go.mod
           go mod tidy
+          rm -f cereal/*/*.capnp.go
           make capnp
+          # Verify new types exist
+          grep -q 'type Camera struct' cereal/offline/offline.capnp.go && echo 'Camera OK'
+          grep -q 'type CameraTile struct' cereal/offline/offline.capnp.go && echo 'CameraTile OK'
+          grep -q 'type CameraInfo struct' cereal/custom/custom.capnp.go && echo 'CameraInfo OK'
           go build -ldflags="-s -w" -o mapd .
 
       - name: Upload binary
