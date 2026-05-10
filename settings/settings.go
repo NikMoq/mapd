@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"pfeifer.dev/mapd/cereal/custom"
-	"pfeifer.dev/mapd/params"
+	"github.com/NikMoq/mapd/cereal/custom"
+	"github.com/NikMoq/mapd/params"
 )
 
 const SETTINGS_VERSION = 1 // Used for migrations
@@ -45,7 +45,6 @@ type MapdSettings struct {
 	ExternalSpeedLimitControlEnabled    bool    `json:"external_speed_limit_control_enabled"`
 	SpeedLimitPriority                  string  `json:"speed_limit_priority"`
 	VisionCurveUseEnableSpeed           bool    `json:"vision_curve_use_enable_speed"`
-	SpeedLimitUseEnableSpeed            bool    `json:"speed_limit_use_enable_speed"`
 	SpeedLimitChangeRequiresAccept      bool    `json:"speed_limit_change_requires_accept"`
 	MapCurveUseEnableSpeed              bool    `json:"map_curve_use_enable_speed"`
 	LogLevel                            string  `json:"log_level"`
@@ -64,6 +63,8 @@ type MapdSettings struct {
 	SlowDownForNextSpeedLimit           bool    `json:"slow_down_for_next_speed_limit"`
 	SpeedUpForNextSpeedLimit            bool    `json:"speed_up_for_next_speed_limit"`
 	HoldSpeedLimitWhileChangingSetSpeed bool    `json:"hold_speed_limit_while_changing_set_speed"`
+	CamerasFile                         string  `json:"cameras_file"`
+	RegionId                            string  `json:"region_id"`
 }
 
 func (s *MapdSettings) Default() {
@@ -304,6 +305,14 @@ func (s *MapdSettings) Handle(input custom.MapdIn) {
 		}
 		s.LogLevel = logLevel
 		s.setLogLevel()
+	case custom.MapdInputType_setRegionId:
+		regionId, err := input.Str()
+		if err != nil {
+			slog.Warn("failed to read region id string", "error", err)
+			return
+		}
+		s.RegionId = regionId
+		slog.Info("Region ID set", "regionId", regionId)
 	}
 }
 
@@ -360,3 +369,4 @@ func (s *MapdSettings) SpeedLimitAccepted() bool {
 func (s *MapdSettings) AcceptSpeedLimit() {
 	s.speedLimitAccepted = true
 }
+

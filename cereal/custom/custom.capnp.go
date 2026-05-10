@@ -1630,6 +1630,7 @@ const (
 	MapdInputType_setAdjustSetSpeedToAcceptSpeedLimit    MapdInputType = 36
 	MapdInputType_setAcceptSpeedLimitTimeout             MapdInputType = 37
 	MapdInputType_setPressGasToOverrideSpeedLimit        MapdInputType = 38
+	MapdInputType_setRegionId                            MapdInputType = 39
 )
 
 // String returns the enum's constant name.
@@ -1713,6 +1714,8 @@ func (c MapdInputType) String() string {
 		return "setAcceptSpeedLimitTimeout"
 	case MapdInputType_setPressGasToOverrideSpeedLimit:
 		return "setPressGasToOverrideSpeedLimit"
+	case MapdInputType_setRegionId:
+		return "setRegionId"
 
 	default:
 		return ""
@@ -1801,6 +1804,8 @@ func MapdInputTypeFromString(c string) MapdInputType {
 		return MapdInputType_setAcceptSpeedLimitTimeout
 	case "setPressGasToOverrideSpeedLimit":
 		return MapdInputType_setPressGasToOverrideSpeedLimit
+	case "setRegionId":
+		return MapdInputType_setRegionId
 
 	default:
 		return 0
@@ -2585,3 +2590,4 @@ func RegisterSchema(reg *schemas.Registry) {
 		Compressed: true,
 	})
 }
+
